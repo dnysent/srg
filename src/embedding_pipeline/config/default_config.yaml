@@ -1,0 +1,66 @@
+provider: "open_clip"      # "open_clip" or "dino_v2"
+
+open_clip:
+  # Small settings (Default)
+  name: "ViT-B-32"           # Options: ViT-B-32, ViT-B-16, ViT-L-14, ViT-H-14, ViT-g-14, ViT-bigG-14
+  pretrained: "laion400m_e32" # Or: laion2b_s34b_b79k, laion2b_s39b_b160k, openai, etc.
+  image_size: 224            # 224, 240, 336, 384, 2048
+  
+  # Production settings
+  # name: "ViT-bigG-14"
+  # pretrained: "laion2b_s39b_b160k"
+  # image_size: 2048
+
+  precision: "fp32"          # fp16, fp32, amp
+  device: "auto"             # auto, cpu, cuda
+  quick_gelu: false          # Set to True only for models that explicitly require it
+
+dino_v2:
+  # Small settings (Default)
+  model_type: "small"        # small, base, large, giant
+  image_size: 224            # 224, 2048
+
+  # Production settings
+  # model_type: "giant"
+  # image_size: 2048
+
+  device: "auto"             # auto, cpu, cuda
+  use_fast: false            # Set to True to use fast processor, False for slow (default for stability)
+
+similarity:
+  method: "weighted_sum"     # concatenation, weighted_sum, svm
+  weights: null              # null = equal weights, or list of X floats
+  weight_bounds: [0.0, 1.0]  # Default bounds for GUI sliders
+  transform_threshold: null  # Optional: float [0, 1] to boost contrast
+  svm_model_path: null       # Path to trained .pkl SVM model
+
+pso:
+  n_particles: 200
+  n_iterations: 20
+  n_workers: 4
+  w: 0.7                     # Inertia weight
+  c1: 1.5                    # Cognitive coefficient
+  c2: 1.5                    # Social coefficient
+  lower_bound: 0.0           # Default lower bound for all weights
+  upper_bound: 1.0           # Default upper bound for all weights
+  cost_function: "thresholded"       # mse, thresholded, binary_cross_entropy
+  cost_threshold: 0.93        # Threshold for 'thresholded' loss
+  per_weight_bounds: null    # Override per-weight: [[0, 0.5], [0.1, 1.0], ...]
+
+svm:
+  kernel: "rbf"
+  C: 180.0
+  gamma: "scale"
+  epsilon: 0.005
+  degree: 3
+  test_size: 0.2
+  random_state: 42
+  cost_function: "mse"
+  cost_threshold: 0.93
+
+tsne:
+  n_components: 3            # 2D or 3D
+  perplexity: 20.0
+  learning_rate: 200.0
+  max_iter: 1000
+  random_state: 42

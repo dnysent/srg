@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Embedding Pipeline</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+
+<body class="bg-light min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-light text-dark mb-2">Multi-Perspective Image Embedding Explorer</h1>
+            <p class="text-gray-500">Compare image embeddings across components</p>
+        </header>
+
+        <!-- Folder Selection -->
+        <div class="card mb-6">
+            <h2 class="text-lg font-medium mb-4">Data Selection</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Embeddings Folder</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="embeddings-folder" class="input flex-1"
+                            placeholder="/path/to/combined/embeddings">
+                        <button onclick="loadSubfolders()" class="btn-primary">Load</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Images Folder (Optional)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="images-folder" class="input flex-1"
+                            placeholder="/path/to/original/images">
+                        <button onclick="setImagesFolder()" class="btn-secondary">Set</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ground Truth Loading -->
+            <div class="grid grid-cols-2 gap-4 mt-4">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Ground Truth Matrix CSV (Optional)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="ground-truth-path" class="input flex-1"
+                            placeholder="/path/to/ground_truth.csv">
+                        <button onclick="loadGroundTruth()" class="btn-secondary">Load GT</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Weights CSV (Optional)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="weights-path" class="input flex-1" placeholder="/path/to/weights.csv">
+                        <button onclick="loadWeights()" class="btn-secondary">Load Weights</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="folder-info" class="mt-4 text-sm text-gray-500 hidden">
+                <span id="subfolders-count">0</span> components •
+                <span id="images-per-subfolder">0</span> images each •
+                <span id="embedding-dim">0</span>-dim embeddings
+            </div>
+            <div id="images-info" class="mt-2 text-sm text-green-600 hidden">
+                ✓ Images folder loaded: <span id="images-components">0</span> components × <span
+                    id="images-count">0</span> images
+            </div>
+            <div id="gt-info" class="mt-2 text-sm text-green-600 hidden">
+                ✓ Ground truth loaded: <span id="gt-size">0</span>×<span id="gt-size2">0</span> matrix
+            </div>
+            <div id="weights-info" class="mt-2 text-sm text-green-600 hidden">
+                ✓ Weights loaded: <span id="weights-count">0</span> weights
+            </div>
+        </div>
+
+        <!-- Similarity Method -->
+        <div class="card mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-medium">Similarity Method</h2>
+                <select id="similarity-method" class="select" onchange="onMethodChange()">
+                    <option value="weighted_sum">Weighted Sum</option>
+                    <option value="concatenation">Concatenation</option>
+                    <option value="svm">SVM (Trained Model)</option>
+                </select>
+            </div>
+
+            <!-- SVM Model Path (shown for svm method) -->
+            <div id="svm-section" class="mb-4 hidden">
+                <label class="block text-sm text-gray-600 mb-1">SVM Model Path</label>
+                <div class="flex gap-2">
+                    <input type="text" id="svm-model-path" class="input flex-1" placeholder="/path/to/svm_model.pkl">
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Path to a trained SVM model (.pkl file)</p>
+            </div>
+
+            <!-- Threshold Transformation -->
+            <div class="mb-4 p-3 bg-gray-50 rounded-lg">
+                <div class="flex items-center gap-4">
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" id="transform-enabled" class="form-checkbox">
+                        <span class="text-sm text-gray-700">Apply threshold transformation</span>
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600">Threshold:</label>
+                        <input type="number" id="transform-threshold" class="input w-20" value="0.5" min="0" max="0.99"
+                            step="0.05">
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">Rescales similarities: values below threshold become 0,
+                    [threshold,1] maps to [0,1]</p>
+            </div>
+
+            <!-- Weight Sliders (shown for weighted_sum) -->
+            <div id="weights-section">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-sm text-gray-600">Weight Configuration (sum: <span
+                            id="weight-sum">1.000</span>)</span>
+                    <button onclick="resetWeights()" class="text-sm text-blue-500 hover:text-blue-600">Reset to
+                        Equal</button>
+                </div>
+                <div id="weight-sliders" class="grid grid-cols-3 gap-3">
+                    <!-- Dynamically populated -->
+                </div>
+            </div>
+
+            <div class="mt-4 flex justify-between items-center">
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600">Custom Axis Order:</label>
+                        <input type="text" id="custom-axis-order" class="input w-64" placeholder="label1, label2, ...">
+                        <button onclick="applyAxisOrder()" class="btn-secondary text-xs">Apply</button>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <label class="flex items-center gap-2 mr-2">
+                        <input type="checkbox" id="prevent-gt-reorder" class="form-checkbox">
+                        <span class="text-sm text-gray-700">Prevent GT re-ordering</span>
+                    </label>
+                    <button id="save-matrix-btn" onclick="saveSimilarityMatrix()" class="btn-secondary hidden">
+                        Save Matrix
+                    </button>
+                    <button onclick="computeSimilarityMatrix()" class="btn-primary">
+                        <span id="compute-btn-text">Compute Similarity Matrix</span>
+                        <span id="compute-spinner" class="spinner hidden"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div id="progress-section" class="card mb-6 hidden">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm text-gray-600">Computing...</span>
+                <span id="progress-percent" class="text-sm font-medium">0%</span>
+            </div>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Side-by-Side Matrix Comparison -->
+        <div id="matrix-section" class="card mb-6 hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-medium">Similarity Matrix Exploration (NxN)</h2>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600">View Mode:</label>
+                        <select id="matrix-view-mode" class="select text-sm py-1" onchange="renderSideBySideMatrices()">
+                            <option value="gt">Ground Truth</option>
+                            <option value="comparison">Comparison Matrix</option>
+                        </select>
+                    </div>
+                    <div id="comparison-threshold-container" class="flex items-center gap-2 hidden">
+                        <label class="text-sm text-gray-600">Binarization Threshold:</label>
+                        <input type="number" id="gt-compare-threshold" class="input w-20 py-1" value="0.5" min="0"
+                            max="1" step="0.05" onchange="renderSideBySideMatrices()">
+                    </div>
+                    <button onclick="openFullWidthView()" class="btn-secondary text-sm py-1">
+                        Open Full-Width View
+                    </button>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-6">
+                <!-- Computed Matrix (Left) -->
+                <div>
+                    <h3 class="text-md font-medium mb-2 text-center text-blue-600">Computed Similarity</h3>
+                    <div id="matrix-container-left" class="overflow-auto" style="max-height: 500px;">
+                        <!-- Computed matrix will be rendered here -->
+                    </div>
+                </div>
+                <!-- Ground Truth Matrix (Right) -->
+                <div>
+                    <h3 id="right-matrix-title" class="text-md font-medium mb-2 text-center text-green-600">Ground Truth
+                    </h3>
+                    <div id="matrix-container-right" class="overflow-auto" style="max-height: 500px;">
+                        <div class="text-gray-400 text-center py-8">No ground truth loaded</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- t-SNE Visualization -->
+        <div id="tsne-section" class="card mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-medium">3D t-SNE Embedding Visualization</h2>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600">Perplexity:</label>
+                        <input type="number" id="tsne-perplexity" class="input w-20" value="30" min="5" max="100">
+                    </div>
+                    <button onclick="computeTSNE()" class="btn-primary" id="tsne-compute-btn">
+                        <span id="tsne-btn-text">Compute t-SNE</span>
+                        <span id="tsne-spinner" class="spinner hidden"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- t-SNE Advanced Options -->
+            <details class="mb-4">
+                <summary class="text-sm text-gray-600 cursor-pointer hover:text-gray-800">Advanced Options</summary>
+                <div class="mt-3 p-3 bg-gray-50 rounded-lg space-y-4">
+                    <!-- Embedding Selection -->
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-2">Select Embeddings to Include:</label>
+                        <div id="tsne-embedding-checkboxes" class="grid grid-cols-4 gap-2">
+                            <!-- Dynamically populated -->
+                        </div>
+                        <button onclick="selectAllTsneEmbeddings()" class="text-xs text-blue-500 mt-2">Select
+                            All</button>
+                    </div>
+
+                    <!-- Scale Factor -->
+                    <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-2">
+                            <label class="text-sm text-gray-600">Scale Factor:</label>
+                            <input type="number" id="tsne-scale-factor" class="input w-20" value="1.0" min="0.01"
+                                step="0.1">
+                        </div>
+                        <button onclick="resetTsneScale()" class="btn-secondary text-xs">Reset to 1.0</button>
+                    </div>
+
+                    <div class="flex items-center gap-4">
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox" id="tsne-transform-enabled" class="form-checkbox">
+                            <span class="text-sm text-gray-600">Apply Threshold Transform:</span>
+                        </label>
+                        <input type="number" id="tsne-transform-threshold" class="input w-20" value="0.5" min="0"
+                            max="0.99" step="0.05">
+                    </div>
+
+                    <!-- Visual Options -->
+                    <div class="flex items-center gap-4">
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox" id="tsne-show-grid" class="form-checkbox" checked
+                                onchange="renderTSNE3D()">
+                            <span class="text-sm text-gray-600">Show Gridlines</span>
+                        </label>
+                    </div>
+
+                    <!-- Clustering Options -->
+                    <div class="border-t pt-3 mt-3">
+                        <div class="flex items-center gap-4 mb-2">
+                            <label class="text-sm text-gray-600">Clustering:</label>
+                            <select id="tsne-cluster-method" class="select" onchange="onClusterMethodChange()">
+                                <option value="">None (color by component)</option>
+                                <option value="kmeans">K-Means</option>
+                                <option value="dbscan">DBSCAN</option>
+                            </select>
+                        </div>
+
+                        <!-- K-Means Options -->
+                        <div id="kmeans-options" class="hidden flex items-center gap-4 mt-2 pl-4">
+                            <label class="text-sm text-gray-600">k (clusters):</label>
+                            <input type="number" id="tsne-cluster-k" class="input w-16" value="3" min="2" max="20">
+                        </div>
+
+                        <!-- DBSCAN Options -->
+                        <div id="dbscan-options" class="hidden flex items-center gap-4 mt-2 pl-4">
+                            <div class="flex items-center gap-2">
+                                <label class="text-sm text-gray-600">epsilon:</label>
+                                <input type="number" id="tsne-cluster-eps" class="input w-20" value="0.5" min="0.01"
+                                    step="0.1">
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <label class="text-sm text-gray-600">min_samples:</label>
+                                <input type="number" id="tsne-cluster-min" class="input w-16" value="2" min="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <!-- t-SNE Progress -->
+            <div id="tsne-progress" class="mb-4 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <span id="tsne-status" class="text-sm text-gray-600">Initializing...</span>
+                </div>
+                <div class="progress-bar">
+                    <div id="tsne-progress-fill" class="progress-fill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- t-SNE 3D Plot (Plotly) -->
+            <div id="tsne-container" class="rounded-lg" style="height: 500px; position: relative;">
+                <div id="tsne-placeholder" class="text-gray-400 text-center py-20 bg-gray-50">
+                    Click "Compute t-SNE" to visualize embeddings
+                </div>
+                <div id="tsne-plot" class="hidden" style="width: 100%; height: 100%;"></div>
+            </div>
+
+            <!-- Selected Point Info -->
+            <div id="tsne-selected-info" class="mt-4 hidden">
+                <h3 class="text-md font-medium mb-2">Selected Point</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-gray-50 p-3 rounded">
+                        <div class="text-sm text-gray-600">Label: <span id="selected-label"
+                                class="font-medium text-dark">-</span></div>
+                        <div class="text-sm text-gray-600">Component: <span id="selected-subfolder"
+                                class="font-medium text-dark">-</span></div>
+                        <div class="text-sm text-gray-600">Image Index: <span id="selected-image-idx"
+                                class="font-medium text-dark">-</span></div>
+                        <div class="text-sm text-gray-600">Filename: <span id="selected-image-filename"
+                                class="font-medium text-dark">-</span></div>
+                    </div>
+                    <div class="flex flex-col items-center">
+                        <div id="tsne-image-preview" class="image-preview mb-2">
+                            <span class="text-gray-400">Select a point to view image</span>
+                        </div>
+                        <div id="tsne-image-controls" class="flex items-center gap-4 hidden">
+                            <button onclick="prevTsneImage()" class="btn-secondary text-xs px-2 py-1">← Prev</button>
+                            <span id="tsne-image-counter" class="text-xs text-gray-500">0 / 0</span>
+                            <button onclick="nextTsneImage()" class="btn-secondary text-xs px-2 py-1">Next →</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Similarity (Top-K) (Full Width) -->
+        <div id="top-k-section" class="card mt-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-medium">Similarity Search (Top-K Matches)</h2>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600">Similarity Threshold:</label>
+                        <input type="number" id="top-k-threshold" class="input w-20" value="0.0" min="0" max="1"
+                            step="0.05">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-600">k:</label>
+                        <input type="number" id="top-k-value" class="input w-16" value="5" min="1" max="50">
+                    </div>
+                    <button onclick="computeTopK()" class="btn-primary">
+                        <span>Find Top-K</span>
+                    </button>
+                </div>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Select Component to Search By</label>
+                    <select id="search-subfolder" class="select w-full" onchange="onSearchSubfolderChange()">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+                <div id="top-k-settings-readout" class="text-[10px] text-gray-400 mb-2 italic">
+                    <!-- Populated via JS -->
+                </div>
+                <div id="top-k-results" class="grid grid-cols-1 gap-2">
+                    <div class="text-gray-400 text-center py-4">results will appear here</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparison Panels -->
+        <div class="grid grid-cols-2 gap-6 mt-6">
+            <!-- Left Panel -->
+            <div class="card">
+                <h2 class="text-lg font-medium mb-4 text-left">Left Component</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Select Component</label>
+                        <select id="left-subfolder" class="select w-full" onchange="onSubfolderChange('left')">
+                            <option value="">-- Select --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Select Image (0-11)</label>
+                        <select id="left-image" class="select w-full" onchange="onImageChange('left')">
+                            <option value="">-- Select --</option>
+                        </select>
+                    </div>
+                    <div id="left-image-preview" class="image-preview">
+                        <span class="text-gray-400">No image selected</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel -->
+            <div class="card">
+                <h2 class="text-lg font-medium mb-4 text-right">Right Component</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Select Component</label>
+                        <select id="right-subfolder" class="select w-full" onchange="onSubfolderChange('right')">
+                            <option value="">-- Select --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-600 mb-1">Select Image (0-11)</label>
+                        <select id="right-image" class="select w-full" onchange="onImageChange('right')">
+                            <option value="">-- Select --</option>
+                        </select>
+                    </div>
+                    <div id="right-image-preview" class="image-preview">
+                        <span class="text-gray-400">No image selected</span>
+                    </div>
+                </div>
+            </div>
+        </div> <!-- End of grid-cols-2 -->
+
+        <!-- Comparison Results (Full Width) -->
+        <div id="comparison-section" class="card mt-6 hidden">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-medium">Component Comparison</h2>
+                <div class="flex items-center gap-4">
+                    <button onclick="compareSubfolders()" class="btn-secondary">Refresh</button>
+                    <button onclick="copyToSlot()" class="btn-primary" title="Save current comparison to a slot below">
+                        Copy to Slot
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6 mb-4">
+                <div id="comparison-settings-readout"
+                    class="p-3 bg-gray-50 rounded-lg border border-gray-100 col-span-2">
+                    <div class="flex items-center gap-4 text-xs text-gray-500">
+                        <span class="font-medium text-blue-600">Computation Details:</span>
+                        <span id="comp-detail-method">Method: --</span>
+                        <span id="comp-detail-weights" class="hidden">Weights: --</span>
+                        <span id="comp-detail-threshold">Threshold: --</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6">
+                <!-- Overall Similarity -->
+                <div class="bg-gradient-to-r from-pastel-blue to-pastel-mint p-4 rounded-lg">
+                    <div class="text-sm text-gray-600">Overall Similarity</div>
+                    <div id="overall-similarity" class="text-3xl font-light text-dark">--</div>
+                </div>
+
+                <!-- Similarity Display -->
+                <div class="bg-gray-50 p-4 rounded-lg overflow-auto">
+                    <!-- Individual Similarities -->
+                    <div id="similarity-details" class="hidden">
+                        <div class="text-sm text-gray-600 mb-2">Individual Similarities</div>
+                        <div id="similarity-bars">
+                            <!-- Bar chart will be rendered here -->
+                        </div>
+                    </div>
+
+                    <!-- Pairwise Matrix -->
+                    <div id="pairwise-matrix-container" class="hidden">
+                        <!-- 12x12 matrix will be rendered here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Stored Comparison Slots (Full Width) -->
+        <div id="comparison-slots" class="mt-8 space-y-8">
+            <!-- Slots will be rendered here -->
+        </div>
+
+        <!-- Full Matrix Comparison Modal -->
+        <div id="full-matrix-modal"
+            class="hidden fixed inset-0 bg-black bg-opacity-75 z-50 overflow-auto flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-[98vw] max-h-[98vh] flex flex-col">
+                <div class="flex items-center justify-between p-4 border-b dark:border-gray-700">
+                    <h2 class="text-xl font-bold dark:text-white">Full Similarity Matrix Comparison</h2>
+                    <button onclick="closeFullMatrixModal()"
+                        class="text-gray-500 hover:text-red-500 text-2xl font-bold">&times;</button>
+                </div>
+                <div class="p-6 overflow-auto flex-1">
+                    <div class="flex flex-col lg:flex-row gap-8 h-full">
+                        <div class="flex flex-col flex-1 h-full">
+                            <h3 class="text-lg font-medium mb-4 text-center text-blue-600 hidden">Computed Similarity
+                            </h3>
+                            <div id="modal-matrix-left" class="modal-matrix-container"></div>
+                        </div>
+                        <div class="flex flex-col flex-1 h-full">
+                            <h3 id="modal-right-title"
+                                class="text-lg font-medium mb-4 text-center text-green-600 hidden">Second Matrix</h3>
+                            <div id="modal-matrix-right" class="modal-matrix-container"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script src="/static/main.js"></script>
+</body>
+
+</html>
